@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import mimetypes
+import shutil
 import gi
 import re
 gi.require_version('Gtk', '3.0')
@@ -23,9 +24,7 @@ from ulauncher.api.shared.action.HideWindowAction import HideWindowAction
 logger = logging.getLogger(__name__)
 
 FILE_SEARCH_ALL = 'ALL'
-
 FILE_SEARCH_DIRECTORY = 'DIR'
-
 FILE_SEARCH_FILE = 'FILE'
 
 
@@ -37,62 +36,66 @@ class FileSearchExtension(Extension):
         super(FileSearchExtension, self).__init__()
         self.subscribe(KeywordQueryEvent, KeywordQueryEventListener())
 
-
     def search(self, query, file_type=None):
-        """ Try with the default fd or the previously successful command """
-        bin_name = 'fd'
-        try:
-            subprocess.check_call([bin_name])
-        except OSError:
-            bin_name = "fdfind" if bin_name == "fd" else "fd"
+        """ Search files using fd/fdfind """
 
-        """ Searches for Files using fd command """
+        # 优先使用 fd；如果没有，再尝试 fdfind
+        if shutil.which('fd'):
+            bin_name = 'fd'
+        elif shutil.which('fdfind'):
+            bin_name = 'fdfind'
+        else:
+            logger.error('Neither fd nor fdfind was found in PATH')
+            return []
+
         cmd = [
             'timeout', '5s', 'ionice', '-c', '3', bin_name, '--threads', '1',
             #'--hidden'
         ]
-        
+
         # 是否显示隐藏的文件或目录
         if self.preferences['show_hidden'] == 'true':
             cmd.append('--hidden')
-        
+
         if file_type == FILE_SEARCH_FILE:
             cmd.append('-t')
             cmd.append('f')
         elif file_type == FILE_SEARCH_DIRECTORY:
             cmd.append('-t')
             cmd.append('d')
-        
+
         # 多个基目录
         for path in self.preferences['base_dir'].split(';'):
             cmd.append('--search-path')
             cmd.append(path)
-        #cmd.append(self.preferences['base_dir'])
-        #cmd.append('-Fa')
-        
+
         # 多个关键词，就一层层筛选
-        # 遍历关键词
         for index, kw in enumerate(query.split(' ')):
             if index != 0:
                 cmd.append('| grep')
             cmd.append(kw)
-            
-            
+
         # 把生成的命令输出到日志
         logger.info(' '.join(cmd))
-        
-        # 执行搜索的命令
-        # subprocess.run 如果命令是数组，就不能使用管道符。所以我把命令转称字符串了，同时Shell=True打开
-        process = subprocess.run(' '.join(cmd), stdout=subprocess.PIPE, encoding='utf-8',shell=True)
+
+        # subprocess.run 如果命令是数组，就不能使用管道符。
+        # 所以这里转成字符串并使用 shell=True
+        process = subprocess.run(
+            ' '.join(cmd),
+            stdout=subprocess.PIPE,
+            encoding='utf-8',
+            shell=True
+        )
         out = process.stdout
         if process.returncode != 0:
             logger.error(process.returncode)
-        
+
         files = out.split('\n')
-        files = list([_f for _f in files if _f])  # remove empty lines
+        files = [_f for _f in files if _f]  # remove empty lines
 
         result = []
-        #get folder icon outside loop, so it only happens once
+
+        # get folder icon outside loop, so it only happens once
         file = Gio.File.new_for_path("/")
         folder_info = file.query_info('standard::icon', 0, Gio.Cancellable())
         folder_icon = folder_info.get_icon().get_names()[0]
@@ -103,14 +106,15 @@ class FileSearchExtension(Extension):
         else:
             folder_icon = "images/folder.png"
 
-        # pylint: disable=C0103
-        max_results = int(self.preferences.get('max_results', '15'))
+        try:
+            max_results = int(self.preferences.get('max_results', '15'))
+        except (TypeError, ValueError):
+            max_results = 15
+
         for f in files[:max_results]:
-            filename = os.path.splitext(f)
             if os.path.isdir(f):
                 icon = folder_icon
             else:
-                #type_, encoding = mimetypes.guess_type(f.decode('utf-8'))
                 type_, encoding = mimetypes.guess_type(f)
 
                 if type_:
@@ -127,18 +131,12 @@ class FileSearchExtension(Extension):
 
         return result
 
-    def get_open_in_terminal_script(self, path):
-        """ Returns the script based on the type of terminal """
-        terminal_emulator = self.preferences['terminal_emulator']
-
-        # some terminals might work differently. This is already prepared for that.
-        if terminal_emulator in [
-                'gnome-terminal', 'terminator', 'tilix', 'xfce-terminal'
-        ]:
-            return RunScriptAction(terminal_emulator,
-                                   ['--working-directory', path])
-
-        return DoNothingAction()
+    def get_open_in_file_manager_action(self, path):
+        """ 用默认文件管理器打开所在位置 """
+        target = path if os.path.isdir(path) else os.path.dirname(path)
+        if not target:
+            target = path
+        return OpenAction(target)
 
 
 class KeywordQueryEventListener(EventListener):
@@ -151,11 +149,8 @@ class KeywordQueryEventListener(EventListener):
 
         query = event.get_argument()
 
-        
-        #if not query or (query.isalpha() and len(query) < 2) :
-
         # 没有输入, 或输入只有1个英文字符，就不搜索
-        if (query is None) or (re.match('^[a-zA-Z0-9]+',query) and len(query) == 1):
+        if (query is None) or (re.match('^[a-zA-Z0-9]+', query) and len(query) == 1):
             logger.info('只有1个英文字符')
             return RenderResultListAction([
                 ExtensionResultItem(
@@ -165,40 +160,46 @@ class KeywordQueryEventListener(EventListener):
             ])
 
         keyword = event.get_keyword()
+
         # Find the keyword id using the keyword (since the keyword can be changed by users)
+        keyword_id = None
         for kw_id, kw in list(extension.preferences.items()):
             if kw == keyword:
                 keyword_id = kw_id
+                break
 
         file_type = FILE_SEARCH_ALL
         if keyword_id == "ff_kw":
             file_type = FILE_SEARCH_FILE
         elif keyword_id == "fd_kw":
             file_type = FILE_SEARCH_DIRECTORY
-        
+
         results = extension.search(query.strip(), file_type)
 
         if not results:
             return RenderResultListAction([
-                ExtensionResultItem(icon='images/icon.png',
-                                    name='No Results found matching %s' %
-                                    query,
-                                    on_enter=HideWindowAction())
+                ExtensionResultItem(
+                    icon='images/icon.png',
+                    name='No Results found matching %s' % query,
+                    on_enter=HideWindowAction())
             ])
 
         items = []
-        max_results = int(extension.preferences.get('max_results', '15'))
+        try:
+            max_results = int(extension.preferences.get('max_results', '15'))
+        except (TypeError, ValueError):
+            max_results = 15
+
         for result in results[:max_results]:
             items.append(
                 ExtensionResultItem(
                     icon=result['icon'],
-                    #name=result['path'].decode("utf-8"),
                     name=result['path'],
-                    #on_enter=OpenAction(result['path'].decode("utf-8")),
                     on_enter=OpenAction(result['path']),
-                    on_alt_enter=extension.get_open_in_terminal_script(
-                        #result['path'].decode("utf-8"))))
-                        result['path'])))
+                    # Alt+Enter：用默认文件管理器打开所在位置
+                    on_alt_enter=extension.get_open_in_file_manager_action(result['path'])
+                )
+            )
 
         return RenderResultListAction(items)
 
