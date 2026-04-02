@@ -14,6 +14,8 @@
 
 ## 我做了什么
 
+- 04022026 Shawn: 把`ExtensionSmallResultItem`改为`ExtensionResultItem`，搜索结果显示更大；
+- 04022026 Shawn：在`manifest.json`中加入`max_results`设置项，并在`main,py`的**107**和**190**行引用，使硬编码的**最大搜索结果项为15**变成可设置。
 - 可以多个搜索目录
 - 可以多个关键词来联合筛选文件
 - 添加是否包含隐藏文件的开关
