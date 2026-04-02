@@ -27,6 +27,13 @@
       "default_value": "fdir"
     },
     {
+    "id": "max_results",
+    "type": "input",
+    "name": "Max Results",
+    "description": "Maximum number of search results",
+    "default_value": "15"
+    },
+    {
       "id": "terminal_emulator",
       "type": "select",
       "name": "Terminal Emulator",
