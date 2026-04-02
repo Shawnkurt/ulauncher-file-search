@@ -186,7 +186,7 @@ class KeywordQueryEventListener(EventListener):
 
         items = []
         try:
-            max_results = int(extension.preferences.get('max_results', '15'))
+            max_results = int(self.preferences.get('max_results', '15'))
         except (TypeError, ValueError):
             max_results = 15
 
