@@ -13,7 +13,7 @@ from ulauncher.api.client.Extension import Extension
 from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.shared.event import KeywordQueryEvent
 from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
-from ulauncher.api.shared.item.ExtensionSmallResultItem import ExtensionSmallResultItem
+from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 from ulauncher.api.shared.action.OpenAction import OpenAction
 from ulauncher.api.shared.action.RunScriptAction import RunScriptAction
@@ -188,7 +188,7 @@ class KeywordQueryEventListener(EventListener):
         items = []
         for result in results[:15]:
             items.append(
-                ExtensionSmallResultItem(
+                ExtensionResultItem(
                     icon=result['icon'],
                     #name=result['path'].decode("utf-8"),
                     name=result['path'],
